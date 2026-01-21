@@ -34,52 +34,53 @@ async def merge_video_audio(
     ffmpeg_path = shutil.which("ffmpeg")
     
     with tempfile.TemporaryDirectory() as tmpdir:
-        # ファイル名を完全に固定して、FFmpegが混乱しないようにする
-        v_in = os.path.join(tmpdir, "v_input") 
-        a_in = os.path.join(tmpdir, "a_input")
+        v_in = os.path.join(tmpdir, "v_in.mp4") 
+        a_in = os.path.join(tmpdir, "a_in.mp3")
         v_out = os.path.join(tmpdir, "output.mp4")
 
-        # 拡張子に依存せずバイナリとして書き込む
+        # ファイル保存
         with open(v_in, "wb") as f: f.write(await video.read())
         with open(a_in, "wb") as f: f.write(await audio.read())
 
-        # 【強化ポイント】
-        # -ac 2 (ステレオ強制) と libx264 (標準映像) で、iPhone動画なども強制変換
-        filter_complex = (
-            f"[0:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[a0];"
-            f"[1:a]volume={volume},aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[a1];"
-            f"[a0][a1]amix=inputs=2:duration=first:dropout_transition=2[aout]"
-        )
+        # シンプルかつ強力なフィルタ設定
+        # 映像は再エンコードせずコピー (-c:v copy)
+        # 音声だけ合成してAACに変換
+        filter_complex = f"[1:a]volume={volume}[bgm];[0:a][bgm]amix=inputs=2:duration=first[aout]"
 
         cmd = [
             ffmpeg_path, "-y",
             "-i", v_in,
             "-i", a_in,
-            "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
             "-filter_complex", filter_complex,
             "-map", "0:v:0",
             "-map", "[aout]",
-            "-c:v", "libx264",
-            "-pix_fmt", "yuv420p", # スマホやブラウザで再生可能な形式に固定
-            "-preset", "ultrafast",
+            "-c:v", "copy", 
             "-c:a", "aac",
             "-shortest",
             v_out
         ]
 
-        try:
-            logger.info("FFmpeg synthesis started...")
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-            
-            if result.returncode != 0:
-                logger.error(f"FFmpeg Stderr: {result.stderr}")
-                raise Exception(f"FFmpeg error: {result.stderr}")
+        logger.info(f"Executing: {' '.join(cmd)}")
 
-            if os.path.exists(v_out) and os.path.getsize(v_out) > 0:
-                return FileResponse(v_out, media_type="video/mp4", filename="mixed_video.mp4")
-            else:
-                raise Exception("Output file is empty or missing")
+        try:
+            # shell=Falseで実行し、エラー出力をキャッチ
+            process = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            
+            if process.returncode != 0:
+                # ここでFFmpegが何を言ったかログに出す
+                logger.error(f"FFmpeg failed with return code {process.returncode}")
+                logger.error(f"FFmpeg Stderr: {process.stderr}")
+                raise HTTPException(status_code=500, detail=f"FFmpeg Error: {process.stderr}")
+
+            if not os.path.exists(v_out):
+                logger.error("Output file missing after FFmpeg process")
+                raise HTTPException(status_code=500, detail="Output file was not created")
+
+            return FileResponse(v_out, media_type="video/mp4", filename="mixed_video.mp4")
                 
+        except subprocess.TimeoutExpired:
+            logger.error("FFmpeg timeout")
+            raise HTTPException(status_code=408, detail="Process timeout")
         except Exception as e:
-            logger.error(f"System Error: {str(e)}")
-            raise HTTPException(status_code=500, detail="動画の合成中にエラーが発生しました。")
+            logger.error(f"Fatal error: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
