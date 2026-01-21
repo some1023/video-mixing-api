@@ -3,7 +3,7 @@ import subprocess
 import tempfile
 import logging
 import shutil
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -22,7 +22,6 @@ app.add_middleware(
 
 @app.get("/")
 def read_root():
-    # 起動時にFFmpegがあるかチェックしてログに出す
     ffmpeg_path = shutil.which("ffmpeg")
     return {"status": "iiakome API is running", "ffmpeg": ffmpeg_path}
 
@@ -32,22 +31,20 @@ async def merge_video_audio(
     audio: UploadFile = File(...),
     volume: float = Form(0.3)
 ):
-    # FFmpegの存在確認
     ffmpeg_path = shutil.which("ffmpeg")
-    if not ffmpeg_path:
-        logger.error("FFmpeg not found in system path")
-        raise HTTPException(status_code=500, detail="FFmpeg is not installed on server")
-
+    
     with tempfile.TemporaryDirectory() as tmpdir:
-        v_ext = os.path.splitext(video.filename)[1].lower() or ".mp4"
-        a_ext = os.path.splitext(audio.filename)[1].lower() or ".mp3"
-        v_in = os.path.join(tmpdir, f"v_in{v_ext}")
-        a_in = os.path.join(tmpdir, f"a_in{a_ext}")
+        # ファイル名を完全に固定して、FFmpegが混乱しないようにする
+        v_in = os.path.join(tmpdir, "v_input") 
+        a_in = os.path.join(tmpdir, "a_input")
         v_out = os.path.join(tmpdir, "output.mp4")
 
+        # 拡張子に依存せずバイナリとして書き込む
         with open(v_in, "wb") as f: f.write(await video.read())
         with open(a_in, "wb") as f: f.write(await audio.read())
 
+        # 【強化ポイント】
+        # -ac 2 (ステレオ強制) と libx264 (標準映像) で、iPhone動画なども強制変換
         filter_complex = (
             f"[0:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[a0];"
             f"[1:a]volume={volume},aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[a1];"
@@ -63,6 +60,7 @@ async def merge_video_audio(
             "-map", "0:v:0",
             "-map", "[aout]",
             "-c:v", "libx264",
+            "-pix_fmt", "yuv420p", # スマホやブラウザで再生可能な形式に固定
             "-preset", "ultrafast",
             "-c:a", "aac",
             "-shortest",
@@ -70,18 +68,18 @@ async def merge_video_audio(
         ]
 
         try:
-            # stderrを確実にキャッチする
+            logger.info("FFmpeg synthesis started...")
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
             
             if result.returncode != 0:
                 logger.error(f"FFmpeg Stderr: {result.stderr}")
-                raise Exception(f"FFmpeg process error: {result.stderr}")
+                raise Exception(f"FFmpeg error: {result.stderr}")
 
-            if not os.path.exists(v_out):
-                raise Exception("Output file was not generated after processing")
-
-            return FileResponse(v_out, media_type="video/mp4", filename="mixed_video.mp4")
-            
+            if os.path.exists(v_out) and os.path.getsize(v_out) > 0:
+                return FileResponse(v_out, media_type="video/mp4", filename="mixed_video.mp4")
+            else:
+                raise Exception("Output file is empty or missing")
+                
         except Exception as e:
-            logger.error(f"Final Error: {str(e)}")
-            raise HTTPException(status_code=500, detail=str(e))
+            logger.error(f"System Error: {str(e)}")
+            raise HTTPException(status_code=500, detail="動画の合成中にエラーが発生しました。")
