@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>iiakome 音声ミックス Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background: #0f172a; color: white; font-family: sans-serif; }
+        .glass { background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(10px); }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-6">
+    <div class="max-w-md w-full glass p-8 rounded-3xl shadow-2xl">
+        <h1 class="text-2xl font-bold mb-2 text-center">🎚️ 音声ミックス・BGM合成</h1>
+        <p class="text-gray-400 text-sm mb-8 text-center">元の動画の音声と、アップロードした音楽を重ね合わせます。</p>
+
+        <form id="uploadForm" class="space-y-6">
+            <div>
+                <label class="block text-sm font-medium mb-2 text-cyan-400">
+                    BGMの音量調整: <span id="volValue">0.3</span>
+                </label>
+                <input type="range" id="bgmVolume" min="0" max="1" step="0.1" value="0.3" 
+                    class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-cyan-500">
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-gray-500 mb-2 uppercase">動画を選択</label>
+                <input type="file" id="video" accept="video/mp4,video/quicktime" required class="block w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700">
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-gray-500 mb-2 uppercase">重ねる音楽を選択</label>
+                <input type="file" id="audio" accept="audio/*" required class="block w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-emerald-600 file:text-white hover:file:bg-emerald-700">
+            </div>
+            
+            <button type="submit" id="submitBtn" class="w-full bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-3 rounded-xl transition-all">
+                音声を重ねて合成する
+            </button>
+        </form>
+
+        <div id="status" class="mt-6 text-center hidden">
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-400 mx-auto mb-2"></div>
+            <p class="text-sm text-cyan-400 italic">ミキシング中...</p>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = "https://video-mixing-api.onrender.com/merge";
+
+        // スライダーの数値を表示に反映
+        const slider = document.getElementById('bgmVolume');
+        const volDisplay = document.getElementById('volValue');
+        slider.oninput = function() { volDisplay.innerText = this.value; }
+
+        document.getElementById('uploadForm').onsubmit = async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('submitBtn');
+            const status = document.getElementById('status');
+            
+            btn.disabled = true;
+            status.classList.remove('hidden');
+
+            const formData = new FormData();
+            formData.append('video', document.getElementById('video').files[0]);
+            formData.append('audio', document.getElementById('audio').files[0]);
+            formData.append('volume', slider.value); // 音量データを追加
+
+            try {
+                const response = await fetch(API_URL, { method: 'POST', body: formData });
+                if (!response.ok) throw new Error();
+
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = "mixed_video.mp4";
+                a.click();
+            } catch (error) {
+                alert("エラーが発生しました。");
+            } finally {
+                btn.disabled = false;
+                status.classList.add('hidden');
+            }
+        };
+    </script>
+</body>
+</html>
