@@ -20,11 +20,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 掃除用関数
+# 処理後に一時ファイルを消す関数
 def cleanup(tmpdir: str):
     try:
         shutil.rmtree(tmpdir)
-        logger.info(f"Cleaned up: {tmpdir}")
+        logger.info(f"Successfully cleaned up: {tmpdir}")
     except Exception as e:
         logger.error(f"Cleanup error: {e}")
 
@@ -34,7 +34,7 @@ def read_root():
 
 @app.post("/merge")
 async def merge_video_audio(
-    background_tasks: BackgroundTasks, # 追加
+    background_tasks: BackgroundTasks,
     video: UploadFile = File(...), 
     audio: UploadFile = File(...),
     volume: float = Form(0.3)
@@ -53,6 +53,7 @@ async def merge_video_audio(
                 while chunk := await source.read(1024 * 1024):
                     f.write(chunk)
 
+        # 映像はコピー、音声のみミックス
         filter_complex = f"[1:a]volume={volume}[bgm];[0:a][bgm]amix=inputs=2:duration=first[aout]"
 
         cmd = [
@@ -65,12 +66,11 @@ async def merge_video_audio(
         process = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
         
         if process.returncode != 0:
-            background_tasks.add_task(cleanup, tmpdir) # 失敗時も掃除
+            background_tasks.add_task(cleanup, tmpdir)
             raise HTTPException(status_code=500, detail="Mixing Failed")
 
-        # 送信後に掃除を実行するように予約
+        # 送信後にフォルダを消す予約
         background_tasks.add_task(cleanup, tmpdir)
-        
         return FileResponse(v_out, media_type="video/mp4", filename="iiakome_mixed.mp4")
 
     except Exception as e:
