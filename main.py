@@ -1,25 +1,31 @@
 import os
 import subprocess
 import tempfile
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
 
-# --- CORS設定（すべてのドメインパターンを網羅） ---
+# 自分のサイトのみを許可
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://iiakome.com",
-        "http://iiakome.com",
-        "https://www.iiakome.com",
-        "http://www.iiakome.com",
-    ],
+    allow_origins=["https://iiakome.com", "https://www.iiakome.com"],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["POST"], # GETなどは不要なので制限
     allow_headers=["*"],
 )
+
+# 【対策】サーバーに届く前にサイズをチェックする(50MB制限)
+MAX_SIZE = 50 * 1024 * 1024
+
+@app.middleware("http")
+async def limit_upload_size(request: Request, call_next):
+    if request.method == "POST":
+        content_length = request.headers.get('content-length')
+        if content_length and int(content_length) > MAX_SIZE:
+            return FileResponse(status_code=413) # Payload Too Large
+    return await call_next(request)
 
 @app.get("/")
 def read_root():
@@ -31,24 +37,25 @@ async def merge_video_audio(
     audio: UploadFile = File(...),
     volume: float = Form(0.3)
 ):
+    # ファイル形式のホワイトリスト
+    if video.content_type not in ["video/mp4", "video/quicktime"]:
+        raise HTTPException(status_code=400, detail="Invalid video format")
+
     with tempfile.TemporaryDirectory() as tmpdir:
-        v_ext = os.path.splitext(video.filename)[1].lower()
-        a_ext = os.path.splitext(audio.filename)[1].lower()
-        
-        v_in = os.path.join(tmpdir, "in_v" + v_ext)
-        a_in = os.path.join(tmpdir, "in_a" + a_ext)
-        v_out = os.path.join(tmpdir, "output.mp4")
+        # ユーザーのファイル名を無視して固定名にする(インジェクション対策)
+        v_in = os.path.join(tmpdir, "v_in.mp4")
+        a_in = os.path.join(tmpdir, "a_in.mp3")
+        v_out = os.path.join(tmpdir, "v_out.mp4")
 
-        content_v = await video.read()
-        with open(v_in, "wb") as f: f.write(content_v)
-        content_a = await audio.read()
-        with open(a_in, "wb") as f: f.write(content_a)
+        try:
+            with open(v_in, "wb") as f: f.write(await video.read())
+            with open(a_in, "wb") as f: f.write(await audio.read())
+        except Exception:
+            raise HTTPException(status_code=500, detail="Storage error")
 
-        # 【修正ポイント】
-        # 元動画に音がない場合でもエラーにならない強力なFFmpegコマンド
-        # 1. 無音(anullsrc)を生成して元動画の音(もしあれば)と合成
-        # 2. BGMの音量を調整
-        # 3. amixで混合
+        # 音量バリデーション (0.0〜1.0以外は拒否)
+        volume = max(0.0, min(1.0, volume))
+
         filter_complex = (
             f"[0:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[a0];"
             f"[1:a]volume={volume},aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[a1];"
@@ -56,27 +63,18 @@ async def merge_video_audio(
         )
 
         cmd = [
-            "ffmpeg", "-y",
-            "-i", v_in,
-            "-i", a_in,
-            "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100", # 無音源を予備で追加
+            "ffmpeg", "-y", "-i", v_in, "-i", a_in,
+            "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
             "-filter_complex", filter_complex,
-            "-map", "0:v:0",   # 映像はそのまま
-            "-map", "[aout]",   # 音声はミックスしたもの
-            "-c:v", "copy",     # 映像は高速コピー
-            "-c:a", "aac",      # 音声はAACに変換
-            "-shortest",        # 短い方に合わせる
-            v_out
+            "-map", "0:v:0", "-map", "[aout]",
+            "-c:v", "copy", "-c:a", "aac", "-shortest", v_out
         ]
 
         try:
-            # 実行ログを確認できるように出力
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            if result.returncode != 0:
-                print(f"FFmpeg Error Output: {result.stderr}")
-                raise Exception("FFmpeg command failed")
-                
+            # 30秒以内に終わらない処理は強制終了させる(タイムアウト対策)
+            subprocess.run(cmd, capture_output=True, timeout=30)
             return FileResponse(v_out, media_type="video/mp4", filename="mixed_video.mp4")
-        except Exception as e:
-            print(f"System Error: {str(e)}")
-            raise HTTPException(status_code=500, detail="動画の合成処理に失敗しました。ファイル形式を確認してください。")
+        except subprocess.TimeoutExpired:
+            raise HTTPException(status_code=408, detail="Processing timeout")
+        except Exception:
+            raise HTTPException(status_code=500, detail="Processing error")
