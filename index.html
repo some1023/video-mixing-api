@@ -3,52 +3,84 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>iiakome 音声ミックス Pro</title>
+    <title>iiakome Mixer Pro</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body { background: #0f172a; color: white; font-family: sans-serif; }
-        .glass { background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(10px); }
+        /* 白基調の柔らかい背景 */
+        body { background-color: #f8fafc; color: #334155; font-family: 'Helvetica Neue', Arial, sans-serif; }
+        .white-card { background: white; border: 1px solid #e2e8f0; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05); }
+        .input-group { background: #f1f5f9; border-radius: 12px; padding: 16px; border: 1px solid transparent; transition: all 0.2s; }
+        .input-group:focus-within { border-color: #3b82f6; background: #fff; }
+        input[type="range"] { accent-color: #3b82f6; }
     </style>
 </head>
-<body class="min-h-screen flex items-center justify-center p-6">
-    <div class="max-w-md w-full glass p-8 rounded-3xl shadow-2xl">
-        <h1 class="text-2xl font-bold mb-2 text-center">🎚️ 音声ミックス・BGM合成</h1>
-        <p class="text-gray-400 text-sm mb-8 text-center">元の動画の音声と、アップロードした音楽を重ね合わせます。</p>
+<body class="min-h-screen flex flex-col items-center py-12 px-4">
+    <div class="max-w-lg w-full white-card rounded-[2rem] p-8 md:p-10">
+        
+        <header class="mb-10 text-center">
+            <h1 class="text-3xl font-extrabold tracking-tight text-slate-900 mb-2">
+                🎚️ 音声ミックス・BGM合成
+            </h1>
+            <p class="text-slate-500 text-sm italic">Video Mixing Engine v2.1</p>
+        </header>
 
-        <form id="uploadForm" class="space-y-6">
-            <div>
-                <label class="block text-sm font-medium mb-2 text-cyan-400">
-                    BGMの音量調整: <span id="volValue">0.3</span>
-                </label>
-                <input type="range" id="bgmVolume" min="0" max="1" step="0.1" value="0.3" 
-                    class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-cyan-500">
+        <form id="uploadForm" class="space-y-8">
+            
+            <div class="input-group">
+                <div class="flex justify-between items-center mb-3">
+                    <label class="font-bold text-slate-700 text-sm uppercase tracking-wider">1. 動画ファイル</label>
+                    <span class="text-[10px] font-bold px-2 py-1 bg-blue-100 text-blue-600 rounded">MAX 50MB</span>
+                </div>
+                <input type="file" id="video" accept="video/mp4,video/quicktime" required 
+                    class="block w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-slate-200 file:text-slate-700 hover:file:bg-slate-300 transition-all cursor-pointer">
+                <p class="mt-2 text-[10px] text-slate-400">対応形式: .mp4 / .mov (音声付き推奨)</p>
             </div>
 
-            <div>
-                <label class="block text-xs font-bold text-gray-500 mb-2 uppercase">動画を選択</label>
-                <input type="file" id="video" accept="video/mp4,video/quicktime" required class="block w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700">
+            <div class="input-group">
+                <div class="flex justify-between items-center mb-3">
+                    <label class="font-bold text-slate-700 text-sm uppercase tracking-wider">2. 重ねる音楽</label>
+                    <span class="text-[10px] font-bold px-2 py-1 bg-emerald-100 text-emerald-600 rounded">MAX 15MB</span>
+                </div>
+                <input type="file" id="audio" accept="audio/*" required 
+                    class="block w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-slate-200 file:text-slate-700 hover:file:bg-slate-300 transition-all cursor-pointer">
+                <p class="mt-2 text-[10px] text-slate-400">対応形式: .mp3 / .wav / .m4a</p>
             </div>
 
-            <div>
-                <label class="block text-xs font-bold text-gray-500 mb-2 uppercase">重ねる音楽を選択</label>
-                <input type="file" id="audio" accept="audio/*" required class="block w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-emerald-600 file:text-white hover:file:bg-emerald-700">
+            <div class="input-group">
+                <div class="flex justify-between items-center mb-4">
+                    <label class="font-bold text-slate-700 text-sm uppercase tracking-wider">3. BGM音量バランス</label>
+                    <span id="volValue" class="text-sm font-black text-blue-600 bg-blue-50 px-3 py-1 rounded-full">0.3</span>
+                </div>
+                <input type="range" id="bgmVolume" min="0" max="1" step="0.05" value="0.3" class="w-full h-2 bg-slate-300 rounded-lg appearance-none cursor-pointer">
+                <div class="flex justify-between mt-2 text-[9px] font-bold text-slate-400 px-1">
+                    <span>最小 (消音)</span>
+                    <span>最大 (100%)</span>
+                </div>
             </div>
             
-            <button type="submit" id="submitBtn" class="w-full bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-3 rounded-xl transition-all">
-                音声を重ねて合成する
+            <button type="submit" id="submitBtn" class="w-full bg-slate-900 hover:bg-black text-white font-bold py-5 rounded-2xl shadow-xl shadow-slate-200 transition-all active:scale-95 disabled:opacity-30 disabled:pointer-events-none">
+                ミキシングを開始する
             </button>
         </form>
 
-        <div id="status" class="mt-6 text-center hidden">
-            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-400 mx-auto mb-2"></div>
-            <p class="text-sm text-cyan-400 italic">ミキシング中...</p>
+        <div id="statusArea" class="mt-8 hidden border-t border-slate-100 pt-8 text-center animate-in fade-in duration-500">
+            <div class="flex justify-center mb-4">
+                <div class="w-8 h-8 border-4 border-slate-200 border-t-blue-500 rounded-full animate-spin"></div>
+            </div>
+            <p id="statusText" class="text-slate-600 font-bold text-sm">サーバーを起動しています...</p>
+            <p class="text-slate-400 text-[10px] mt-2 italic">※初回起動は最長1分かかる場合があります</p>
         </div>
     </div>
 
+    <footer class="mt-8 text-center text-[10px] text-slate-400 tracking-widest uppercase font-bold">
+        &copy; 2026 iiakome.com | Powered by Render & FastAPI
+    </footer>
+
     <script>
+        // バックエンドURL
         const API_URL = "https://video-mixing-api.onrender.com/merge";
 
-        // スライダーの数値を表示に反映
+        // スライダー数値の同期
         const slider = document.getElementById('bgmVolume');
         const volDisplay = document.getElementById('volValue');
         slider.oninput = function() { volDisplay.innerText = this.value; }
@@ -56,31 +88,49 @@
         document.getElementById('uploadForm').onsubmit = async (e) => {
             e.preventDefault();
             const btn = document.getElementById('submitBtn');
-            const status = document.getElementById('status');
-            
+            const statusArea = document.getElementById('statusArea');
+            const statusText = document.getElementById('statusText');
+
+            const videoFile = document.getElementById('video').files[0];
+            const audioFile = document.getElementById('audio').files[0];
+
+            // サイズバリデーション
+            if (videoFile.size > 50 * 1024 * 1024) return alert("動画が50MBを超えています。");
+
             btn.disabled = true;
-            status.classList.remove('hidden');
+            statusArea.classList.remove('hidden');
+            statusText.innerText = "動画をアップロード中...";
 
             const formData = new FormData();
-            formData.append('video', document.getElementById('video').files[0]);
-            formData.append('audio', document.getElementById('audio').files[0]);
-            formData.append('volume', slider.value); // 音量データを追加
+            formData.append('video', videoFile);
+            formData.append('audio', audioFile);
+            formData.append('volume', slider.value);
 
             try {
-                const response = await fetch(API_URL, { method: 'POST', body: formData });
-                if (!response.ok) throw new Error();
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    body: formData,
+                });
 
+                if (!response.ok) throw new Error("CORS or Server Error");
+
+                statusText.innerText = "処理完了！保存しています...";
+                
                 const blob = await response.blob();
                 const url = window.URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = "mixed_video.mp4";
+                a.download = `iiakome_mixed_${Date.now()}.mp4`;
+                document.body.appendChild(a);
                 a.click();
+                a.remove();
+                
             } catch (error) {
-                alert("エラーが発生しました。");
+                console.error(error);
+                alert("エラーが発生しました。CORS設定またはサーバーの起動状態を確認してください。");
             } finally {
                 btn.disabled = false;
-                status.classList.add('hidden');
+                statusArea.classList.add('hidden');
             }
         };
     </script>
