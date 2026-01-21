@@ -5,13 +5,18 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-# 【重要】ここが抜けていると「appが定義されていません」になります
 app = FastAPI()
 
-# iiakome.com からのアクセスを許可（セキュリティ設定）
+# --- CORS設定の修正 ---
+# iiakome.com からのアクセスをあらゆるパターンで許可します
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://iiakome.com", "http://127.0.0.1:5500", "null"],
+    allow_origins=[
+        "https://iiakome.com",
+        "http://iiakome.com",
+        "https://www.iiakome.com",
+        "http://www.iiakome.com",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -29,7 +34,7 @@ def read_root():
 async def merge_video_audio(
     video: UploadFile = File(...), 
     audio: UploadFile = File(...),
-    volume: float = Form(0.3)  # フロントエンドのスライダー値を受け取る
+    volume: float = Form(0.3)
 ):
     with tempfile.TemporaryDirectory() as tmpdir:
         v_ext = os.path.splitext(video.filename)[1].lower()
@@ -40,13 +45,16 @@ async def merge_video_audio(
         v_out = os.path.join(tmpdir, "output.mp4")
 
         # ファイル保存
-        content_v = await video.read()
-        with open(v_in, "wb") as f: f.write(content_v)
-        content_a = await audio.read()
-        with open(a_in, "wb") as f: f.write(content_a)
+        try:
+            content_v = await video.read()
+            with open(v_in, "wb") as f: f.write(content_v)
+            content_a = await audio.read()
+            with open(a_in, "wb") as f: f.write(content_a)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"File save error: {str(e)}")
 
         # FFmpeg実行 (amixフィルタで音量を反映)
-        # volume={volume} の部分にフロントエンドからの数値が入ります
+        # duration=first により、動画の長さに合わせて出力をカットします
         filter_complex = f"[1:a]volume={volume}[bgm]; [0:a][bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]"
 
         cmd = [
@@ -63,7 +71,9 @@ async def merge_video_audio(
         ]
 
         try:
-            subprocess.run(cmd, check=True, capture_output=True)
+            # 実行ログをキャプチャしてエラー時に確認できるようにする
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
             return FileResponse(v_out, media_type="video/mp4", filename="mixed_video.mp4")
         except subprocess.CalledProcessError as e:
-            raise HTTPException(status_code=500, detail="合成失敗")
+            print(f"FFmpeg error output: {e.stderr}")
+            raise HTTPException(status_code=500, detail="FFmpeg processing failed")
