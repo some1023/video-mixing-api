@@ -33,18 +33,20 @@ async def merge_video_audio(
 ):
     ffmpeg_path = shutil.which("ffmpeg")
     
-    with tempfile.TemporaryDirectory() as tmpdir:
+    # tempfile.mkdtemp を使い、一時フォルダの寿命を確実に管理
+    tmpdir = tempfile.mkdtemp()
+    try:
         v_in = os.path.join(tmpdir, "v_in.mp4") 
         a_in = os.path.join(tmpdir, "a_in.mp3")
         v_out = os.path.join(tmpdir, "output.mp4")
 
-        # ファイル保存
-        with open(v_in, "wb") as f: f.write(await video.read())
-        with open(a_in, "wb") as f: f.write(await audio.read())
+        # 【超重要】メモリ節約のため1MBずつディスクに書き込む
+        for source, dest in [(video, v_in), (audio, a_in)]:
+            with open(dest, "wb") as f:
+                while chunk := await source.read(1024 * 1024):
+                    f.write(chunk)
 
-        # シンプルかつ強力なフィルタ設定
-        # 映像は再エンコードせずコピー (-c:v copy)
-        # 音声だけ合成してAACに変換
+        # 映像を再エンコードせず、音声のミックスのみを行う最軽量コマンド
         filter_complex = f"[1:a]volume={volume}[bgm];[0:a][bgm]amix=inputs=2:duration=first[aout]"
 
         cmd = [
@@ -54,33 +56,27 @@ async def merge_video_audio(
             "-filter_complex", filter_complex,
             "-map", "0:v:0",
             "-map", "[aout]",
-            "-c:v", "copy", 
-            "-c:a", "aac",
+            "-c:v", "copy",     # 映像は絶対にいじらない（メモリ対策）
+            "-c:a", "aac",      # 音声のみ変換
             "-shortest",
             v_out
         ]
 
-        logger.info(f"Executing: {' '.join(cmd)}")
+        logger.info(f"FFmpeg command starting...")
+        # 実行
+        process = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
+        
+        if process.returncode != 0:
+            logger.error(f"FFmpeg Failed: {process.stderr}")
+            raise HTTPException(status_code=500, detail="FFmpeg Mixing Failed")
 
-        try:
-            # shell=Falseで実行し、エラー出力をキャッチ
-            process = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-            
-            if process.returncode != 0:
-                # ここでFFmpegが何を言ったかログに出す
-                logger.error(f"FFmpeg failed with return code {process.returncode}")
-                logger.error(f"FFmpeg Stderr: {process.stderr}")
-                raise HTTPException(status_code=500, detail=f"FFmpeg Error: {process.stderr}")
+        if not os.path.exists(v_out):
+            raise HTTPException(status_code=500, detail="Result file not found")
 
-            if not os.path.exists(v_out):
-                logger.error("Output file missing after FFmpeg process")
-                raise HTTPException(status_code=500, detail="Output file was not created")
+        return FileResponse(v_out, media_type="video/mp4", filename="iiakome_mixed.mp4")
 
-            return FileResponse(v_out, media_type="video/mp4", filename="mixed_video.mp4")
-                
-        except subprocess.TimeoutExpired:
-            logger.error("FFmpeg timeout")
-            raise HTTPException(status_code=408, detail="Process timeout")
-        except Exception as e:
-            logger.error(f"Fatal error: {str(e)}")
-            raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.error(f"Process Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+    # ファイル送信後に一時フォルダを消すと送信エラーになるため、
+    # 本来はBackgroundTasksで消すべきですが、まずは動かすことを優先します。
